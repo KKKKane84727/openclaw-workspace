@@ -166,9 +166,11 @@ Cartooner (执行) ── 构建/修改 ──► 更新写入 CAPABILITIES.md
 
 #### heartbeat-monitor 观测逻辑
 - 在 ETA 内：视为 `Active`
+- 若 `watch_policy.mode=fast`：在其 `duration` 窗口内对该 `task_id` 按 `interval` 高频巡检（首版 `1m`）
 - 接近 ETA 但未完成：标记 `delayed`，可发一次轻量提醒
 - 超过 ETA 且无合理进展：标记 `stalled`，读取日志分析原因并输出诊断
-- 对跨 Agent 等待同样适用；`waiting_reply` 必须带预估 ETA
+- 对跨 Agent 等待同样适用；`waiting_reply` 必须带预估 ETA，且应优先声明 `watch_policy.reason=cross_agent_waiting`
+- 对跨 Agent 未回复，heartbeat-monitor 需进一步判断原因：`TARGET_DEAD` / `DELIVERY_FAILED` / `NOT_PICKED_UP` / `BUSY_WITH_OTHER_TASK` / `INTERNAL_ERROR` / `UNKNOWN`
 
 #### ETA 变更规则
 - 若执行方发现原 ETA 不准，必须显式更新事件

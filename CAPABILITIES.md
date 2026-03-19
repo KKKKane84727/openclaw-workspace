@@ -96,7 +96,9 @@
 ### 核心职责
 - ACP 会话生命周期监控
 - stall 诊断（TOOL_HANG / PROCESS_DEAD / LLM_TIMEOUT / UNKNOWN）
+- 跨 Agent 未回复原因诊断（TARGET_DEAD / DELIVERY_FAILED / NOT_PICKED_UP / BUSY_WITH_OTHER_TASK / INTERNAL_ERROR / UNKNOWN）
 - 异常升级通知
+- 高频观察策略执行（消费执行方声明的 `watch_policy`）
 - 定时任务触发（cron）
 
 ### 能力边界
