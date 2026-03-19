@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "skills": {
+    "feishu-messaging": {
+      "version": "0.0.3",
+      "installedAt": 1773207798124
+    },
+    "feishu-bridge": {
+      "version": "1.0.0",
+      "installedAt": 1773208868500
+    },
+    "feishu-doc-manager": {
+      "version": "1.0.0",
+      "installedAt": 1773208875041
+    },
+    "feishu-bitable": {
+      "version": "1.0.0",
+      "installedAt": 1773208878403
+    },
+    "agent-reach": {
+      "version": "1.1.0",
+      "installedAt": 1773305240835
+    },
+    "lawyer": {
+      "version": "1.0.0",
+      "installedAt": 1773305896932
+    },
+    "legal-advisor": {
+      "version": "1.1.1",
+      "installedAt": 1773305908714
+    },
+    "enterprise-legal-guardrails": {
+      "version": "1.0.20",
+      "installedAt": 1773308862077
+    }
+  }
+}
