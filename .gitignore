@@ -21,3 +21,7 @@ pids/
 coverage/
 .nyc_output/
 .env
+
+# Python caches
+__pycache__/
+*.py[cod]

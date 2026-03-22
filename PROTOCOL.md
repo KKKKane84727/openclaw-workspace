@@ -157,6 +157,7 @@ Cartooner (执行) ── 构建/修改 ──► 更新写入 CAPABILITIES.md
 - `tried`
 
 委派方先尝试用已有上下文自行回答；只有缺少外部事实、需求多义会改变结果、或涉及高代价 / 不可逆决策时，才升级给用户。
+运行时上，Cartooner 会对 `Status: blocked` 的 `TaskResult` 做 gate 判断：命中上述升级条件时才发用户可见澄清；否则只保留内部结构化 signal，由 Cartooner 继续吸收处理。
 
 #### 终态信号标准格式 (`TerminalSignal`)
 所有跨 Agent 终态回报使用统一 payload：
@@ -292,7 +293,7 @@ Cartooner (执行) ── 构建/修改 ──► 更新写入 CAPABILITIES.md
 
 ### 适用范围
 所有跨 Agent 任务流转均须在飞书群同步生命周期事件。
-目标群: `oc_fc0711cb56585f29457ddf640c354371`（统一 ops 视图）
+目标群: `oc_5006225a09c968e88b01f66903fa1162`（统一 ops 视图）
 
 ### 发布者
 - **Koder / Mor**（业务层）：任务全生命周期的主要发布者（接收、计划、进度、完成）
@@ -393,6 +394,13 @@ Cartooner (执行) ── 构建/修改 ──► 更新写入 CAPABILITIES.md
 2. 重新委派（产生新的 `delegation_sent` 通知）
 3. 继续推送直到验收通过
 
+运行时补充：
+- Cartooner adapter 会把终态 worker 回执归一化为 `cartooner_acceptance_result`
+- 该结构会镜像到 `session:metadata_updated` 与终态 lifecycle metadata，作为 UI / 群通知 / 监控的统一验收输入
+- 当前状态枚举至少包括：`accepted`、`awaiting_user`、`retrying_in_cartooner`、`rejected`、`contract_invalid`
+- 若解析到 Feishu publish target，Cartooner 会再调度 `cartooner_acceptance_notification`，把验收摘要发往对应 `feishuSession`
+- 当前 publish target 默认从 `workspace-heartbeat/memory/heartbeat-state.json` 的 `workspace-cartooner.feishuSession` / `defaultTargets.feishuSession` 解析
+
 #### 9.5 治理审批转发 (`governance_approval_relay`)
 
 适用范围：Warden 发到统一飞书群的治理审批请求（例如 `capability-evolver` 巡检发现需要变更）。
@@ -402,6 +410,7 @@ Cartooner (执行) ── 构建/修改 ──► 更新写入 CAPABILITIES.md
   - `批准 <approval_id>`
   - `拒绝 <approval_id> <原因>`
 - Cartooner 作为 Kane 唯一窗口，负责把人类回复转发给 Warden
+- 转发前后统一使用 `governance-approval-flow` skill 管理台账、格式校验和委派模板
 - 转发使用 `ApprovalResult`，并补充 `ApprovalId: <approval_id>`
 - Warden 收到后自行匹配 `memory/pending-approvals.json` 中的待审批票据，再继续提案、治理或委派
 - 若本轮无变更，Warden 不向飞书群发送审批请求

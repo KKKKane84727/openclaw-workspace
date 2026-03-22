@@ -124,7 +124,7 @@ TaskId: <stable task_id>
 | 验收未通过 | ❌ | 委派方验收未通过 |
 | 灰色操作记录 | ⚠️ | 执行灰色地带操作时 |
 
-目标群: `oc_fc0711cb56585f29457ddf640c354371`
+目标群: `oc_5006225a09c968e88b01f66903fa1162`
 
 治理审批场景固定通过 `channel:feishu + accountId: cartooner` 发往该群；群内审批回复无需 `@`。
 
