@@ -30,6 +30,9 @@ Subcommands:
 - `check-readiness`
   - Checks the approval ledger and required env vars like `A2A_NODE_ID`.
   - Writes a local `last_run` record and returns `ready` or `blocked`.
+- `list-tickets`
+  - Lists ledger tickets with optional status and age filters.
+  - Useful for checking whether stale `pending` approvals are accumulating.
 - `create-ticket`
   - Creates a pending ticket in Warden's ledger.
   - Returns `approval_id`, stored ticket fields, and the exact Feishu approval message to send.
@@ -45,6 +48,12 @@ Subcommands:
 - `mark-dispatch`
   - Marks an approved ticket as `completed` or `dispatch_failed` after Warden finishes the next action.
   - Repeating the same final status is idempotent; attempting to flip from one final status to the other is rejected.
+- `expire-ticket`
+  - Marks a still-pending ticket as `expired`.
+  - Useful for cleaning up abandoned rehearsal tickets without hand-editing the ledger.
+- `expire-stale`
+  - Finds `pending` tickets older than a threshold and expires them in batch.
+  - Supports `--dry-run` for preview-only cleanup.
 
 ## Warden Workflow
 
@@ -56,6 +65,8 @@ Subcommands:
 6. If the result includes `dispatch.kind = sessions_send`, send `dispatch.task_request_message` to `dispatch.target_session_key`.
 7. After successful dispatch or local governance completion, run `mark-dispatch --status completed`.
 8. If the dispatch itself fails, run `mark-dispatch --status dispatch_failed --reason "<原因>"` once and keep the final state unchanged afterward.
+9. If a rehearsal or approval attempt is abandoned before any human decision, run `expire-ticket --approval-id <approval_id>`.
+10. If multiple old `pending` tickets accumulate, preview them with `list-tickets --status pending --older-than-minutes <N>` and batch clean them with `expire-stale --older-than-minutes <N>`.
 
 ## Cartooner Workflow
 

@@ -11,7 +11,7 @@ import os
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -37,6 +37,20 @@ class LedgerError(Exception):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso_datetime(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def ensure_parent(path: Path) -> None:
@@ -136,6 +150,28 @@ def find_ticket(ledger: Dict[str, Any], approval_id: str) -> Optional[Dict[str, 
         if str(ticket.get("approval_id") or "").strip() == approval_id:
             return ticket
     return None
+
+
+def ticket_anchor_datetime(ticket: Dict[str, Any]) -> Optional[datetime]:
+    return parse_iso_datetime(ticket.get("updated_at")) or parse_iso_datetime(ticket.get("created_at"))
+
+
+def ticket_overview(ticket: Dict[str, Any], *, now_dt: Optional[datetime] = None) -> Dict[str, Any]:
+    anchor = ticket_anchor_datetime(ticket)
+    age_minutes: Optional[int] = None
+    if anchor is not None:
+        reference = now_dt or datetime.now(timezone.utc)
+        age_minutes = max(0, int((reference - anchor).total_seconds() // 60))
+    return {
+        "approval_id": ticket.get("approval_id"),
+        "status": ticket.get("status"),
+        "summary": ticket.get("summary"),
+        "risk_level": ticket.get("risk_level"),
+        "recommended_owner": ticket.get("recommended_owner"),
+        "created_at": ticket.get("created_at"),
+        "updated_at": ticket.get("updated_at"),
+        "age_minutes": age_minutes,
+    }
 
 
 def ticket_signature(ticket: Dict[str, Any]) -> str:
@@ -362,6 +398,44 @@ def invalid_result(message: str, *, error_code: str) -> Dict[str, Any]:
         "error_code": error_code,
         "message": message,
     }
+
+
+def cmd_list_tickets(args: argparse.Namespace) -> int:
+    ledger_path = Path(args.ledger_path)
+    ledger = load_ledger(ledger_path)
+    now_dt = datetime.now(timezone.utc)
+    statuses = {item.strip().lower() for item in args.status if item.strip()}
+    older_than_minutes = args.older_than_minutes
+    matches = []
+
+    for ticket in ledger["tickets"]:
+        status = str(ticket.get("status") or "").strip().lower()
+        if statuses and status not in statuses:
+            continue
+        overview = ticket_overview(ticket, now_dt=now_dt)
+        age_minutes = overview["age_minutes"]
+        if older_than_minutes is not None:
+            if age_minutes is None or age_minutes < older_than_minutes:
+                continue
+        matches.append(overview)
+
+    matches.sort(key=lambda item: (item["age_minutes"] is None, -(item["age_minutes"] or 0), str(item["approval_id"] or "")))
+    if args.limit is not None and args.limit >= 0:
+        matches = matches[: args.limit]
+
+    counts: Dict[str, int] = {}
+    for ticket in ledger["tickets"]:
+        key = str(ticket.get("status") or "unknown").strip().lower() or "unknown"
+        counts[key] = counts.get(key, 0) + 1
+
+    return print_json(
+        {
+            "status": "ok",
+            "ledger_path": str(ledger_path),
+            "counts": counts,
+            "matches": matches,
+        }
+    )
 
 
 def cmd_check_readiness(args: argparse.Namespace) -> int:
@@ -634,6 +708,113 @@ def cmd_mark_dispatch(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_expire_ticket(args: argparse.Namespace) -> int:
+    ledger_path = Path(args.ledger_path)
+    ledger = load_ledger(ledger_path)
+    ticket = find_ticket(ledger, args.approval_id.strip())
+    if ticket is None:
+        return print_json(
+            invalid_result(
+                f"审批单不存在：{args.approval_id}",
+                error_code="unknown_approval_id",
+            )
+        )
+
+    if ticket["status"] == "expired":
+        return print_json(
+            {
+                "status": "idempotent",
+                "approval_id": ticket["approval_id"],
+                "ticket_status": ticket["status"],
+                "ticket": ticket,
+            }
+        )
+
+    if ticket["status"] != "pending":
+        return print_json(
+            invalid_result(
+                f"当前票据状态为 {ticket['status']}，不能标记为 expired",
+                error_code="invalid_ticket_state",
+            )
+        )
+
+    ticket["status"] = "expired"
+    ticket["updated_at"] = now_iso()
+    ticket["decided_at"] = ticket["updated_at"]
+    ticket["decision_reason"] = args.reason.strip() or "审批票据已过期"
+    ticket["dispatch"] = {
+        "kind": "none",
+        "note": "审批票据已过期，不执行后续治理动作。",
+    }
+    update_last_run(ledger, status="expired", reason=ticket["approval_id"])
+    save_ledger(ledger_path, ledger)
+    return print_json(
+        {
+            "status": "expired",
+            "approval_id": ticket["approval_id"],
+            "ticket": ticket,
+        }
+    )
+
+
+def cmd_expire_stale(args: argparse.Namespace) -> int:
+    ledger_path = Path(args.ledger_path)
+    ledger = load_ledger(ledger_path)
+    now_dt = datetime.now(timezone.utc)
+    cutoff = now_dt - timedelta(minutes=args.older_than_minutes)
+    matches = []
+
+    for ticket in ledger["tickets"]:
+        if ticket.get("status") != "pending":
+            continue
+        anchor = ticket_anchor_datetime(ticket)
+        if anchor is None or anchor > cutoff:
+            continue
+        matches.append(ticket)
+
+    matches.sort(key=lambda item: ticket_anchor_datetime(item) or now_dt)
+    if args.limit is not None and args.limit >= 0:
+        matches = matches[: args.limit]
+
+    preview = [ticket_overview(ticket, now_dt=now_dt) for ticket in matches]
+    if args.dry_run:
+        return print_json(
+            {
+                "status": "dry_run",
+                "ledger_path": str(ledger_path),
+                "older_than_minutes": args.older_than_minutes,
+                "matched_count": len(preview),
+                "matches": preview,
+            }
+        )
+
+    for ticket in matches:
+        ticket["status"] = "expired"
+        ticket["updated_at"] = now_iso()
+        ticket["decided_at"] = ticket["updated_at"]
+        ticket["decision_reason"] = args.reason.strip() or f"pending timeout > {args.older_than_minutes} minutes"
+        ticket["dispatch"] = {
+            "kind": "none",
+            "note": "审批票据已因超时过期，不执行后续治理动作。",
+        }
+
+    update_last_run(
+        ledger,
+        status="expired_stale" if matches else "expired_stale_noop",
+        reason=f"count={len(matches)} older_than={args.older_than_minutes}",
+    )
+    save_ledger(ledger_path, ledger)
+    return print_json(
+        {
+            "status": "expired" if matches else "noop",
+            "ledger_path": str(ledger_path),
+            "older_than_minutes": args.older_than_minutes,
+            "matched_count": len(preview),
+            "matches": [ticket_overview(ticket, now_dt=now_dt) for ticket in matches],
+        }
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Deterministic helpers for Warden governance approvals")
     parser.add_argument(
@@ -646,6 +827,12 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser("check-readiness")
     check_parser.add_argument("--require-env", action="append", default=[], help="Required env var name")
     check_parser.set_defaults(func=cmd_check_readiness)
+
+    list_parser = subparsers.add_parser("list-tickets")
+    list_parser.add_argument("--status", action="append", default=[], help="Filter by status; repeatable")
+    list_parser.add_argument("--older-than-minutes", type=int, default=None, help="Only include tickets older than this many minutes")
+    list_parser.add_argument("--limit", type=int, default=50)
+    list_parser.set_defaults(func=cmd_list_tickets)
 
     create_parser = subparsers.add_parser("create-ticket")
     create_parser.add_argument("--summary", required=True)
@@ -676,6 +863,18 @@ def build_parser() -> argparse.ArgumentParser:
     mark_dispatch_parser.add_argument("--status", required=True, choices=["completed", "dispatch_failed"])
     mark_dispatch_parser.add_argument("--reason", default="")
     mark_dispatch_parser.set_defaults(func=cmd_mark_dispatch)
+
+    expire_ticket_parser = subparsers.add_parser("expire-ticket")
+    expire_ticket_parser.add_argument("--approval-id", required=True)
+    expire_ticket_parser.add_argument("--reason", default="")
+    expire_ticket_parser.set_defaults(func=cmd_expire_ticket)
+
+    expire_stale_parser = subparsers.add_parser("expire-stale")
+    expire_stale_parser.add_argument("--older-than-minutes", required=True, type=int)
+    expire_stale_parser.add_argument("--limit", type=int, default=20)
+    expire_stale_parser.add_argument("--reason", default="")
+    expire_stale_parser.add_argument("--dry-run", action="store_true")
+    expire_stale_parser.set_defaults(func=cmd_expire_stale)
 
     return parser
 

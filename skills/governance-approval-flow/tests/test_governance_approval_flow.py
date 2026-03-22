@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -21,6 +22,25 @@ def call_command(tmp_path: Path, *args: str) -> dict:
         exit_code = MODULE.main(["--ledger-path", str(ledger_path), *args])
     assert exit_code == 0
     return json.loads(stdout.getvalue())
+
+
+def rewrite_ticket_timestamps(tmp_path: Path, approval_id: str, *, created_at: str, updated_at: str) -> None:
+    ledger_path = tmp_path / "pending-approvals.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    for ticket in ledger["tickets"]:
+        if ticket["approval_id"] == approval_id:
+            ticket["created_at"] = created_at
+            ticket["updated_at"] = updated_at
+    ledger_path.write_text(json.dumps(ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def read_ticket(tmp_path: Path, approval_id: str) -> dict:
+    ledger_path = tmp_path / "pending-approvals.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    for ticket in ledger["tickets"]:
+        if ticket["approval_id"] == approval_id:
+            return ticket
+    raise AssertionError(f"ticket not found: {approval_id}")
 
 
 def test_check_readiness_blocks_when_required_env_missing(tmp_path, monkeypatch):
@@ -291,3 +311,195 @@ def test_create_ticket_reuses_equivalent_pending_ticket(tmp_path):
     assert first["status"] == "created"
     assert second["status"] == "existing"
     assert second["approval_id"] == first["approval_id"]
+
+
+def test_expire_ticket_marks_pending_ticket_expired(tmp_path):
+    created = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "待清理的演练票据",
+        "--risk-level",
+        "low",
+        "--recommended-owner",
+        "warden",
+        "--reason",
+        "演练后需要关闭",
+    )
+
+    expired = call_command(
+        tmp_path,
+        "expire-ticket",
+        "--approval-id",
+        created["approval_id"],
+        "--reason",
+        "演练结束",
+    )
+    repeated = call_command(
+        tmp_path,
+        "expire-ticket",
+        "--approval-id",
+        created["approval_id"],
+    )
+
+    assert expired["status"] == "expired"
+    assert expired["ticket"]["status"] == "expired"
+    assert expired["ticket"]["decision_reason"] == "演练结束"
+    assert repeated["status"] == "idempotent"
+
+
+def test_expire_ticket_rejects_non_pending_ticket(tmp_path):
+    created = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "已批准票据",
+        "--risk-level",
+        "medium",
+        "--recommended-owner",
+        "warden",
+        "--reason",
+        "验证非 pending 拒绝",
+    )
+    parsed = call_command(tmp_path, "parse-reply", "--text", f"批准 {created['approval_id']}")
+    call_command(tmp_path, "apply-ump-result", "--text", parsed["ump_message"])
+
+    result = call_command(
+        tmp_path,
+        "expire-ticket",
+        "--approval-id",
+        created["approval_id"],
+    )
+
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "invalid_ticket_state"
+
+
+def test_list_tickets_filters_stale_pending(tmp_path):
+    old_ticket = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "旧挂单",
+        "--risk-level",
+        "low",
+        "--recommended-owner",
+        "warden",
+        "--reason",
+        "等待超时清理",
+    )
+    fresh_ticket = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "新挂单",
+        "--risk-level",
+        "low",
+        "--recommended-owner",
+        "warden",
+        "--reason",
+        "最近创建",
+    )
+    rewrite_ticket_timestamps(
+        tmp_path,
+        old_ticket["approval_id"],
+        created_at="2026-03-20T00:00:00Z",
+        updated_at="2026-03-20T00:00:00Z",
+    )
+
+    result = call_command(
+        tmp_path,
+        "list-tickets",
+        "--status",
+        "pending",
+        "--older-than-minutes",
+        "60",
+    )
+
+    assert result["status"] == "ok"
+    assert any(item["approval_id"] == old_ticket["approval_id"] for item in result["matches"])
+    assert all(item["approval_id"] != fresh_ticket["approval_id"] for item in result["matches"])
+
+
+def test_expire_stale_dry_run_does_not_mutate_ledger(tmp_path):
+    created = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "仅预览过期",
+        "--risk-level",
+        "medium",
+        "--recommended-owner",
+        "warden",
+        "--reason",
+        "验证 dry-run",
+    )
+    rewrite_ticket_timestamps(
+        tmp_path,
+        created["approval_id"],
+        created_at="2026-03-20T00:00:00Z",
+        updated_at="2026-03-20T00:00:00Z",
+    )
+
+    preview = call_command(
+        tmp_path,
+        "expire-stale",
+        "--older-than-minutes",
+        "60",
+        "--dry-run",
+    )
+    status = read_ticket(tmp_path, created["approval_id"])
+
+    assert preview["status"] == "dry_run"
+    assert preview["matched_count"] == 1
+    assert status["status"] == "pending"
+
+
+def test_expire_stale_marks_matching_pending_tickets_expired(tmp_path):
+    stale_ticket = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "应过期挂单",
+        "--risk-level",
+        "high",
+        "--recommended-owner",
+        "koder",
+        "--reason",
+        "长时间无人处理",
+    )
+    fresh_ticket = call_command(
+        tmp_path,
+        "create-ticket",
+        "--summary",
+        "保留挂单",
+        "--risk-level",
+        "high",
+        "--recommended-owner",
+        "koder",
+        "--reason",
+        "不应过期",
+    )
+    rewrite_ticket_timestamps(
+        tmp_path,
+        stale_ticket["approval_id"],
+        created_at="2026-03-20T00:00:00Z",
+        updated_at="2026-03-20T00:00:00Z",
+    )
+
+    expired = call_command(
+        tmp_path,
+        "expire-stale",
+        "--older-than-minutes",
+        "60",
+        "--reason",
+        "批量清理超时挂单",
+    )
+    stale_status = read_ticket(tmp_path, stale_ticket["approval_id"])
+    fresh_status = read_ticket(tmp_path, fresh_ticket["approval_id"])
+
+    assert expired["status"] == "expired"
+    assert expired["matched_count"] == 1
+    assert stale_status["status"] == "expired"
+    assert stale_status["decision_reason"] == "批量清理超时挂单"
+    assert fresh_status["status"] == "pending"
