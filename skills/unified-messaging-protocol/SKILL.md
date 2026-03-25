@@ -63,6 +63,16 @@ via `message` 工具。格式：`<emoji> [<阶段>] <Agent名> + payload`
 
 频率：接收和终态必发；进度更新仅在有意义的里程碑时。
 
+### 交付物飞书推送（硬规则）
+
+任务产出可交付产物（文档/文件/报告/链接）时，task_completed 的飞书广播**必须附带交付物**：
+- 文件类产物：用 `message` 工具的 `media` 参数发送
+- 文档类产物：创建飞书文档后附带链接
+- 数据类产物：写入飞书多维表格后附带链接
+- 纯文本/摘要：直接包含在消息正文中
+
+agent 根据产物类型自行选择最合适的飞书工具，不限定具体方式。
+
 ### 4. ApprovalRequest — 请求审批
 
 via `sessions_send` → warden。payload：操作、上下文、风险。Warden 120s 无响应视为 REJECTED。
