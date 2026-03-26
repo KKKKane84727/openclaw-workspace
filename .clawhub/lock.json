@@ -32,6 +32,14 @@
     "enterprise-legal-guardrails": {
       "version": "1.0.20",
       "installedAt": 1773308862077
+    },
+    "plansuite": {
+      "version": "0.1.3",
+      "installedAt": 1774524489114
+    },
+    "agent-task-tracker": {
+      "version": "1.1.0",
+      "installedAt": 1774524492469
     }
   }
 }
