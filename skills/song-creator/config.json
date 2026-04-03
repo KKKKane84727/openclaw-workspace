@@ -1,0 +1,35 @@
+{
+  "provider": {
+    "name": "minimax",
+    "endpoint": "https://api.minimaxi.com/v1/music_generation",
+    "default_model": "music-2.5",
+    "models": {
+      "music-2.5": { "auth_profile": "minimax:cn" },
+      "music-2.5+": { "auth_profile": "minimax:music-plus", "supports_is_instrumental": true }
+    }
+  },
+  "defaults": {
+    "format": "mp3",
+    "sample_rate": 44100,
+    "bitrate": 256000
+  },
+  "constraints": {
+    "formats": ["mp3", "wav", "pcm"],
+    "modes": ["bgm", "song"],
+    "models": ["music-2.5", "music-2.5+"],
+    "max_prompt_length": 2000,
+    "max_lyrics_length": 3500
+  },
+  "official_api_parameters": [
+    "model", "prompt", "lyrics", "stream", "output_format",
+    "audio_setting", "aigc_watermark", "lyrics_optimizer", "is_instrumental"
+  ],
+  "not_supported_parameters": [
+    "duration", "reference_audio_url"
+  ],
+  "output": {
+    "directory": "/tmp/openclaw",
+    "pattern": "song-{mode}-{timestamp}.{format}",
+    "metadata": true
+  }
+}
