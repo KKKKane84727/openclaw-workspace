@@ -15,7 +15,7 @@ Phase 3 生成音乐时的 API 用法和 prompt 构造参考。
 
 ## Helper Contract
 
-**Script**: `~/.openclaw/workspace-cartooner/skills/song-creator/scripts/generate_song.mjs`
+**Script**: `{baseDir}/scripts/generate_song.mjs`
 **Invocation**: `echo '<JSON>' | node <script>`
 
 **Input (stdin JSON):**

@@ -6,6 +6,7 @@ description: >
 tags: [music, song, bgm, minimax, audio, lyrics, composition]
 platforms: [Claude, Gemini]
 allowed-tools: [Bash, Read, Write]
+metadata: {"openclaw": {"primaryEnv": "MINIMAX_API_KEY", "requires": {"env": ["MINIMAX_API_KEY"]}}}
 ---
 
 # Song Creator
@@ -87,7 +88,7 @@ Create songs, background music, and instrumentals using MiniMax music generation
 用同一主题/风格调用 MiniMax 原生歌词生成，作为韵脚和结构参考（不替代 Agent 作品）：
 
 ```bash
-echo '{"prompt": "<风格,情绪,主题的逗号描述>"}' | node ~/.openclaw/skills/song-creator/scripts/generate_lyrics.mjs
+echo '{"prompt": "<风格,情绪,主题的逗号描述>"}' | node {baseDir}/scripts/generate_lyrics.mjs
 ```
 
 返回 `{"ok": true, "lyrics": "...", "style_tags": "...", "song_title": "..."}`。
